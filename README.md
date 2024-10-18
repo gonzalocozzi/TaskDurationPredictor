@@ -84,4 +84,4 @@ Las contribuciones son bienvenidas. Si deseas contribuir, por favor crea un fork
 
 ## Licencia
 
-Este proyecto está bajo la Licencia MIT. Para más detalles, consulta el archivo [LICENSE](https://github.com/gonzalocozzi/TaskDurationPredictor/blob/main/LICENSE).
+Este proyecto está bajo la GNU General Public License v3.0. Para más detalles, consulta el archivo [LICENSE](https://github.com/gonzalocozzi/TaskDurationPredictor/blob/main/LICENSE).
