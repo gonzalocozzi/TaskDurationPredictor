@@ -68,7 +68,7 @@ namespace TaskDurationPredictor.Repository
             }
         }
 
-        internal void AddOrUpdatetaskHistory(string taskName, double actualDuration)
+        public void AddOrUpdateTaskHistory(string taskName, double actualDuration)
         {
             if (HasTaskHistory(taskName))
             {
