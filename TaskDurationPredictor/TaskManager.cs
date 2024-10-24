@@ -1,103 +1,66 @@
-using System.Text.Json;
+using TaskDurationPredictor.Repository;
 
 namespace TaskDurationPredictor
 {
     public class TaskManager
     {
-        private readonly string _historyFile;
-        private List<TaskHistory> _taskHistories;
 
-        public TaskManager(string historyFile)
+        private readonly TaskHistoryRepository _repository;
+        private static readonly Random random = new(); // Generador de números aleatorios
+
+        public TaskManager(TaskHistoryRepository repository)
         {
-            _historyFile = historyFile;
-            _taskHistories = [];
-            LoadTaskHistory();
+            _repository = repository;
         }
 
-        public bool HasTaskHistory(string taskName)
+        public async Task SimulateTaskAsync(string taskName,
+                                            Action<double, double?> onProgressUpdated,
+                                            Action<double> averageDurationMessage,
+                                            Action<double> actualDurationMessage,
+                                            CancellationToken cancellationToken)
         {
-            return _taskHistories.Any(t => t.TaskName == taskName);
-        }
+            double actualDuration;
+            double averageDuration = 0;
+            bool usePrediction = _repository.HasTaskHistory(taskName);
 
-        public double GetAverageDuration(string taskName)
-        {
-            var taskHistory = _taskHistories.First(t => t.TaskName == taskName);
-            return taskHistory.Durations.Average();
-        }
-
-        public void SimulateTaskWithPrediction(string taskName, Action<int, double> reportProgress)
-        {
-            if (!HasTaskHistory(taskName))
-                throw new InvalidOperationException("No hay datos históricos para esta tarea.");
-
-            double averageDuration = GetAverageDuration(taskName);
-            DateTime startTime = DateTime.Now;
-
-            for (int i = 1; i <= 100; i++) // Simular una tarea
+            if (usePrediction)
             {
-                Thread.Sleep(100); // Simular trabajo
-                double elapsedSeconds = (DateTime.Now - startTime).TotalSeconds;
-                double estimatedRemaining = Math.Max(averageDuration - elapsedSeconds, 0);
-
-                // Notificar el progreso y el tiempo estimado restante
-                reportProgress(i, estimatedRemaining);
-            }
-
-            double actualDuration = (DateTime.Now - startTime).TotalSeconds;
-            UpdateTaskHistory(taskName, actualDuration);
-        }
-
-        public void SimulateTaskWithoutPrediction(string taskName, Action<int> reportProgress)
-        {
-            DateTime startTime = DateTime.Now;
-
-            for (int i = 1; i <= 100; i++) // Simular una tarea
-            {
-                Thread.Sleep(100); // Simular trabajo
-                reportProgress(i); // Notificar el progreso
-            }
-
-            double actualDuration = (DateTime.Now - startTime).TotalSeconds;
-            AddNewTaskHistory(taskName, actualDuration);
-        }
-
-        private void LoadTaskHistory()
-        {
-            if (File.Exists(_historyFile))
-            {
-                string json = File.ReadAllText(_historyFile);
-                _taskHistories = JsonSerializer.Deserialize<List<TaskHistory>>(json) ?? [];
-            }
-        }
-
-        private void SaveTaskHistory()
-        {
-            string json = JsonSerializer.Serialize(_taskHistories, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(_historyFile, json);
-        }
-
-        public void UpdateTaskHistory(string taskName, double duration)
-        {
-            var taskHistory = _taskHistories.FirstOrDefault(t => t.TaskName == taskName);
-            if (taskHistory != null)
-            {
-                taskHistory.Durations.Add(duration);
+                averageDuration = _repository.GetAverageDuration(taskName);
+                double randomFactor = random.NextDouble() * 1.5 + 0.1;
+                actualDuration = averageDuration * randomFactor;
+                averageDurationMessage.Invoke(averageDuration);
             }
             else
             {
-                AddNewTaskHistory(taskName, duration);
+                actualDuration = random.Next(5, 30); // Duración aleatoria sin predicción
             }
-            SaveTaskHistory();
-        }
 
-        public void AddNewTaskHistory(string taskName, double duration)
-        {
-            _taskHistories.Add(new TaskHistory
+            double progress = 0;
+            double elapsed = 0;
+
+            while (progress < 100)
             {
-                TaskName = taskName,
-                Durations = [duration]
-            });
-            SaveTaskHistory();
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    Console.WriteLine("Simulación cancelada.");
+                    break;
+                }
+
+                await Task.Delay(500); // Simula un segundo de trabajo
+                elapsed++;
+                progress = elapsed / actualDuration * 100;
+                if (progress > 100) progress = 100;
+
+                double? estimatedRemaining = usePrediction ? actualDuration - elapsed : null;
+                if (estimatedRemaining.HasValue && estimatedRemaining < 0) estimatedRemaining = 0;
+                onProgressUpdated?.Invoke(progress, estimatedRemaining); // Llama al callback
+            }
+
+            if (progress == 100)
+            {
+                actualDurationMessage.Invoke(actualDuration);
+                _repository.AddOrUpdatetaskHistory(taskName, actualDuration);
+            }
         }
     }
 }

@@ -1,35 +1,28 @@
-﻿using System;
-using TaskDurationPredictor;
+﻿using TaskDurationPredictor.Repository;
 
-public class Program
+namespace TaskDurationPredictor
 {
-    static void Main(string[] args)
+    static class Program
     {
-        string taskName = "TareaEjemplo";
-        string historyFile = "taskHistory.json";
-        TaskManager taskManager = new TaskManager(historyFile);
-
-        if (taskManager.HasTaskHistory(taskName))
+        static async Task Main(string[] args)
         {
-            Console.WriteLine("Datos históricos encontrados. Estimando duración...");
-            taskManager.SimulateTaskWithPrediction(taskName, ReportProgressWithPrediction);
-        }
-        else
-        {
-            Console.WriteLine("No hay datos históricos para esta tarea.");
-            taskManager.SimulateTaskWithoutPrediction(taskName, ReportProgress);
-        }
-    }
+            TaskHistoryRepository repository = new("taskHistory.json");
+            TaskManager taskManager = new(repository);
+            CancellationTokenSource cts = new();
 
-    // Método para reportar el progreso y estimación restante
-    static void ReportProgressWithPrediction(int progress, double estimatedRemaining)
-    {
-        Console.Write($"\rProgreso: {progress}% - Estimado restante: {estimatedRemaining:F2} segundos   ");
-    }
+            Console.WriteLine("Ingresa el nombre de la tarea:");
+            string taskName = Console.ReadLine();
 
-    // Método para reportar solo el progreso
-    static void ReportProgress(int progress)
-    {
-        Console.Write($"\rProgreso: {progress}%   ");
+            Console.WriteLine("Simulando tarea...");
+            await taskManager.SimulateTaskAsync(taskName,
+            (progress, estimatedRemaining) =>
+            {
+                string message = estimatedRemaining.HasValue ? $"Progreso: {progress:F2}% | Tiempo estimado restante: {estimatedRemaining:F2} segundos" : $"Progreso: {progress:F2}%";
+                Console.WriteLine(message);
+            },
+            (averageDuration) => Console.WriteLine($"Duración estimada: {averageDuration:F2} segundos"),
+            (actualDuration) => Console.WriteLine($"Tiempo total de ejecución: {actualDuration:F2} segundos"),
+            cts.Token);
+        }
     }
 }
