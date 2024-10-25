@@ -39,7 +39,7 @@ namespace TaskDurationPredictor.Repository
             }
         }
 
-        public double GetAverageDuration(string taskName)
+        public static double GetAverageDuration(string taskName)
         {
             TaskHistory history = taskHistories.Find(t => t.TaskName == taskName);
             if (history != null && history.Durations.Count > 0)
@@ -54,7 +54,7 @@ namespace TaskDurationPredictor.Repository
             return 0;
         }
 
-        public bool HasTaskHistory(string taskName)
+        public static bool HasTaskHistory(string taskName)
         {
             return taskHistories.Exists(t => t.TaskName == taskName);
         }

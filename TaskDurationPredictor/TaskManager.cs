@@ -1,16 +1,24 @@
+using System.Collections.Concurrent;
 using TaskDurationPredictor.Repository;
 
 namespace TaskDurationPredictor
 {
     public class TaskManager
     {
-
         private readonly TaskHistoryRepository _repository;
-        private static readonly Random random = new(); // Generador de números aleatorios
+        private readonly BlockingCollection<SimulationResult> _resultQueue;
+        private static readonly Random _random = new();
+
+        // Constantes para controlar la variabilidad
+        private const double MIN_RANDOM_FACTOR = 0.5;
+        private const double MAX_RANDOM_FACTOR = 2.5;
+        private const int MIN_BASE_DURATION = 3;
+        private const int MAX_BASE_DURATION = 45;
 
         public TaskManager(TaskHistoryRepository repository)
         {
-            _repository = repository;
+            _repository = repository ?? throw new ArgumentNullException(nameof(repository));
+            _resultQueue = [];
         }
 
         public async Task SimulateTaskAsync(string taskName,
@@ -19,101 +27,168 @@ namespace TaskDurationPredictor
                                             Action<double> actualDurationMessage,
                                             CancellationToken cancellationToken)
         {
-            double actualDuration;
-            double averageDuration = 0;
-            bool usePrediction = _repository.HasTaskHistory(taskName);
+            if (string.IsNullOrEmpty(taskName))
+                throw new ArgumentNullException(nameof(taskName));
 
-            if (usePrediction)
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+            try
             {
-                averageDuration = _repository.GetAverageDuration(taskName);
-                double randomFactor = random.NextDouble() * 1.5 + 0.1;
-                actualDuration = averageDuration * randomFactor;
-                averageDurationMessage.Invoke(averageDuration);
+                var calculationTask = Task.Run(() =>
+                    CalculationThreadAsync(taskName, linkedCts.Token), linkedCts.Token);
+
+                var presentationTask = Task.Run(() =>
+                    PresentationThread(onProgressUpdated, averageDurationMessage, actualDurationMessage, linkedCts.Token),
+                    linkedCts.Token);
+
+                await Task.WhenAll(calculationTask, presentationTask);
             }
-            else
+            finally
             {
-                actualDuration = random.Next(5, 30); // Duración aleatoria sin predicción
-            }
-
-            double progress = 0;
-            double elapsed = 0;
-
-            while (progress < 100)
-            {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    Console.WriteLine("Simulación cancelada.");
-                    break;
-                }
-
-                await Task.Delay(500); // Simula medio segundo de trabajo
-                elapsed += 0.5;
-                progress = elapsed / actualDuration * 100;
-                if (progress > 100) progress = 100;
-
-                double? estimatedRemaining = usePrediction ? actualDuration - elapsed : null;
-                if (estimatedRemaining.HasValue && estimatedRemaining < 0) estimatedRemaining = 0;
-                onProgressUpdated?.Invoke(progress, estimatedRemaining); // Llama al callback
-            }
-
-            if (progress == 100)
-            {
-                actualDurationMessage.Invoke(actualDuration);
-                _repository.AddOrUpdateTaskHistory(taskName, actualDuration);
+                _resultQueue.Dispose();
             }
         }
 
-        public async Task SimulateTaskAsyncV2(string taskName,
-                                            Action<double, double?> onProgressUpdated,
-                                            Action<double> averageDurationMessage,
-                                            Action<double> actualDurationMessage,
-                                            CancellationToken cancellationToken)
+        private async Task CalculationThreadAsync(string taskName, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var simulationParams = CalculateSimulationParameters(taskName);
+
+                if (!cancellationToken.IsCancellationRequested && simulationParams.UsePrediction)
+                {
+                    _resultQueue.Add(new SimulationResult
+                    {
+                        AverageDuration = simulationParams.AverageDuration
+                    },
+                    cancellationToken);
+                }
+
+                var finalProgress = await SimulateProgressAsync(simulationParams, cancellationToken);
+
+                if (!cancellationToken.IsCancellationRequested && finalProgress >= 100)
+                {
+                    _resultQueue.Add(new SimulationResult
+                    {
+                        ActualDuration = simulationParams.ActualDuration,
+                        IsCompleted = true,
+                        Progress = 100
+                    }, cancellationToken);
+
+                    await Task.Run(() => _repository.AddOrUpdateTaskHistory(taskName, simulationParams.ActualDuration),
+                        cancellationToken);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                _resultQueue.Add(new SimulationResult { IsCancelled = true }, cancellationToken);
+            }
+            finally
+            {
+                _resultQueue.CompleteAdding();
+            }
+        }
+
+        private static (double ActualDuration, double AverageDuration, bool UsePrediction, double Progress) CalculateSimulationParameters(string taskName)
         {
             double actualDuration;
             double averageDuration = 0;
-            bool usePrediction = _repository.HasTaskHistory(taskName);
+            bool usePrediction = TaskHistoryRepository.HasTaskHistory(taskName);
 
             if (usePrediction)
             {
-                averageDuration = _repository.GetAverageDuration(taskName);
-                double randomFactor = random.NextDouble() * 1.5 + 0.1;
-                actualDuration = averageDuration * randomFactor;
-                averageDurationMessage.Invoke(averageDuration);
+                averageDuration = TaskHistoryRepository.GetAverageDuration(taskName);
+
+                // Aplicamos múltiples factores de aleatoriedad
+                double baseRandomFactor = _random.NextDouble() * (MAX_RANDOM_FACTOR - MIN_RANDOM_FACTOR) + MIN_RANDOM_FACTOR;
+
+                // Añadimos una variación adicional basada en una distribución normal
+                double normalDistribution = RandomGeneratorService.NormalDistributionRandom();
+                double combinedFactor = baseRandomFactor * (1 + normalDistribution * 0.2);
+
+                actualDuration = averageDuration * combinedFactor;
             }
             else
             {
-                actualDuration = random.Next(5, 30); // Duración aleatoria sin predicción
+                // Para duraciones sin predicción, usamos una distribución más variada
+                double baseValue = _random.Next(MIN_BASE_DURATION, MAX_BASE_DURATION);
+                double variationFactor = 1 + (_random.NextDouble() - 0.5) * 0.6; // ±30% variación
+                actualDuration = baseValue * variationFactor;
             }
 
-            double progress = 0;
+            return (actualDuration, averageDuration, usePrediction, 0);
+        }
+
+        private async Task<double> SimulateProgressAsync((double ActualDuration, double AverageDuration, bool UsePrediction, double Progress) parameters,
+            CancellationToken cancellationToken)
+        {
             double elapsed = 0;
+            double progress = parameters.Progress;
 
-            while (progress < 100)
+            // Añadimos variabilidad al progreso
+            double progressVariability = 1.0;
+
+            while (progress < 100 && !cancellationToken.IsCancellationRequested)
             {
-                if (cancellationToken.IsCancellationRequested)
+                await Task.Delay(500, cancellationToken);
+
+                // Añadimos variabilidad al tiempo transcurrido
+                double timeIncrement = 0.5 * (1 + (_random.NextDouble() - 0.5) * 0.2); // ±10% variación
+                elapsed += timeIncrement;
+
+                // Actualizamos la variabilidad del progreso
+                progressVariability = Math.Max(0.8, Math.Min(1.2, progressVariability + (_random.NextDouble() - 0.5) * 0.1));
+                progress = Math.Min(elapsed / parameters.ActualDuration * 100 * progressVariability, 100);
+
+                double? estimatedRemaining = parameters.UsePrediction ?
+                    Math.Max(parameters.ActualDuration - elapsed, 0) :
+                    null;
+
+                _resultQueue.Add(new SimulationResult
                 {
-                    Console.WriteLine("Simulación cancelada.");
-                    break;
-                }
-
-                var randomElapsedTime = random.Next(10, 100);
-                await Task.Delay(randomElapsedTime); // Simula medio segundo de trabajo
-                elapsed += randomElapsedTime / 1000d;
-                Console.WriteLine(elapsed);
-                progress++;
-
-                var elapsedTimePrediction = 100 * elapsed / progress;
-                var currentAverageDuration = (averageDuration + elapsedTimePrediction) / 2;
-
-                double? estimatedRemaining = usePrediction ? currentAverageDuration - elapsed : null;
-                if (estimatedRemaining.HasValue && estimatedRemaining < 0) estimatedRemaining = 0;
-                onProgressUpdated?.Invoke(progress, estimatedRemaining); // Llama al callback
+                    Progress = progress,
+                    EstimatedRemaining = estimatedRemaining
+                },
+                cancellationToken);
             }
 
-            if (progress == 100)
+            return progress;
+        }
+
+        private void PresentationThread(Action<double, double?> onProgressUpdated,
+                                        Action<double> averageDurationMessage,
+                                        Action<double> actualDurationMessage,
+                                        CancellationToken cancellationToken)
+        {
+            try
             {
-                actualDurationMessage.Invoke(elapsed);
-                _repository.AddOrUpdateTaskHistory(taskName, elapsed);
+                foreach (var result in _resultQueue.GetConsumingEnumerable(cancellationToken))
+                {
+                    if (result.IsCancelled)
+                    {
+                        Console.WriteLine("Simulación cancelada.");
+                        break;
+                    }
+
+                    if (result.AverageDuration.HasValue)
+                    {
+                        averageDurationMessage?.Invoke(result.AverageDuration.Value);
+                    }
+
+                    if (result.Progress > 0)
+                    {
+                        onProgressUpdated?.Invoke(result.Progress, result.EstimatedRemaining);
+                    }
+
+                    if (result.IsCompleted && result.ActualDuration.HasValue)
+                    {
+                        actualDurationMessage?.Invoke(result.ActualDuration.Value);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                Console.WriteLine("Simulación cancelada.");
             }
         }
     }

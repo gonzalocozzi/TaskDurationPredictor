@@ -2,9 +2,9 @@
 
 namespace TaskDurationPredictor
 {
-    static class Program
+    internal static class Program
     {
-        static async Task Main(string[] args)
+        private static async Task Main(string[] args)
         {
             TaskHistoryRepository repository = new("taskHistory.json");
             TaskManager taskManager = new(repository);
