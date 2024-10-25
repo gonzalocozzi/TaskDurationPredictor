@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using TaskDurationPredictor.Helper;
+using TaskDurationPredictor.Model;
 using TaskDurationPredictor.Repository;
 
 namespace TaskDurationPredictor
@@ -103,7 +105,7 @@ namespace TaskDurationPredictor
                 double baseRandomFactor = _random.NextDouble() * (MAX_RANDOM_FACTOR - MIN_RANDOM_FACTOR) + MIN_RANDOM_FACTOR;
 
                 // Añadimos una variación adicional basada en una distribución normal
-                double normalDistribution = RandomGeneratorService.NormalDistributionRandom();
+                double normalDistribution = RandomHelper.NormalDistributionRandom();
                 double combinedFactor = baseRandomFactor * (1 + normalDistribution * 0.2);
 
                 actualDuration = averageDuration * combinedFactor;

@@ -6,7 +6,7 @@ namespace TaskDurationPredictor
     {
         private static async Task Main(string[] args)
         {
-            TaskHistoryRepository repository = new("taskHistory.json");
+            TaskHistoryRepository repository = new("./Data/taskHistory.json");
             TaskManager taskManager = new(repository);
             CancellationTokenSource cts = new();
 

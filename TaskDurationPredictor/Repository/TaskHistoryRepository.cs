@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TaskDurationPredictor.Model;
 
 namespace TaskDurationPredictor.Repository
 {

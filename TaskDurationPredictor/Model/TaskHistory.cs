@@ -1,4 +1,4 @@
-namespace TaskDurationPredictor
+namespace TaskDurationPredictor.Model
 {
     public class TaskHistory
     {

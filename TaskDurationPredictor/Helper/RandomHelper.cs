@@ -1,6 +1,6 @@
-namespace TaskDurationPredictor
+namespace TaskDurationPredictor.Helper
 {
-    internal static class RandomGeneratorService
+    internal static class RandomHelper
     {
         private static readonly Random _random = new();
 
