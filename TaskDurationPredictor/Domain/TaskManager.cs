@@ -3,7 +3,7 @@ using TaskDurationPredictor.Helper;
 using TaskDurationPredictor.Model;
 using TaskDurationPredictor.Repository;
 
-namespace TaskDurationPredictor
+namespace TaskDurationPredictor.Domain
 {
     public class TaskManager
     {
@@ -11,18 +11,21 @@ namespace TaskDurationPredictor
         private readonly BlockingCollection<SimulationResult> _resultQueue;
         private static readonly Random _random = new();
 
-        // Constantes para controlar la variabilidad
         private const double MIN_RANDOM_FACTOR = 0.5;
         private const double MAX_RANDOM_FACTOR = 2.5;
         private const int MIN_BASE_DURATION = 3;
         private const int MAX_BASE_DURATION = 45;
+
+        // Factores para el sistema de estimación adaptativa
+        private const int PROGRESS_WINDOW_SIZE = 5;  // Tamaño de la ventana para calcular la velocidad reciente
+        private const double HISTORICAL_WEIGHT = 0.6; // Peso de la estimación histórica vs. la actual
+        private const double ADAPTATION_RATE = 0.2;   // Qué tan rápido se adapta la estimación
 
         public TaskManager(TaskHistoryRepository repository)
         {
             _repository = repository ?? throw new ArgumentNullException(nameof(repository));
             _resultQueue = [];
         }
-
         public async Task SimulateTaskAsync(string taskName,
                                             Action<double, double?> onProgressUpdated,
                                             Action<double> averageDurationMessage,
@@ -122,29 +125,42 @@ namespace TaskDurationPredictor
         }
 
         private async Task<double> SimulateProgressAsync((double ActualDuration, double AverageDuration, bool UsePrediction, double Progress) parameters,
-            CancellationToken cancellationToken)
+                                                         CancellationToken cancellationToken)
         {
             double elapsed = 0;
             double progress = parameters.Progress;
-
-            // Añadimos variabilidad al progreso
             double progressVariability = 1.0;
+
+            var progressTracker = new ProgressTracker(
+                parameters.UsePrediction ? parameters.AverageDuration : parameters.ActualDuration,
+                PROGRESS_WINDOW_SIZE,
+                ADAPTATION_RATE,
+                HISTORICAL_WEIGHT
+            );
 
             while (progress < 100 && !cancellationToken.IsCancellationRequested)
             {
                 await Task.Delay(500, cancellationToken);
 
-                // Añadimos variabilidad al tiempo transcurrido
-                double timeIncrement = 0.5 * (1 + (_random.NextDouble() - 0.5) * 0.2); // ±10% variación
+                // Variabilidad en el tiempo transcurrido
+                double timeIncrement = 0.5 * (1 + (_random.NextDouble() - 0.5) * 0.2);
                 elapsed += timeIncrement;
 
-                // Actualizamos la variabilidad del progreso
-                progressVariability = Math.Max(0.8, Math.Min(1.2, progressVariability + (_random.NextDouble() - 0.5) * 0.1));
+                // Actualizar progreso con variabilidad
+                progressVariability = Math.Max(0.8, Math.Min(1.2,
+                    progressVariability + (_random.NextDouble() - 0.5) * 0.1));
                 progress = Math.Min(elapsed / parameters.ActualDuration * 100 * progressVariability, 100);
 
-                double? estimatedRemaining = parameters.UsePrediction ?
-                    Math.Max(parameters.ActualDuration - elapsed, 0) :
-                    null;
+                // Actualizar el tracker y obtener nueva estimación
+                progressTracker.AddProgressPoint(progress, elapsed);
+                double currentEstimate = progressTracker.UpdateEstimate(progress, elapsed);
+
+                // Calcular tiempo restante estimado
+                double? estimatedRemaining = null;
+                if (parameters.UsePrediction)
+                {
+                    estimatedRemaining = Math.Max(currentEstimate - elapsed, 0);
+                }
 
                 _resultQueue.Add(new SimulationResult
                 {
