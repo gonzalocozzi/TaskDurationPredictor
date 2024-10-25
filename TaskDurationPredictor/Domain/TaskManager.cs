@@ -58,14 +58,14 @@ namespace TaskDurationPredictor.Domain
         {
             try
             {
-                var simulationParams = CalculateSimulationParameters(taskName);
                 var startTime = DateTime.UtcNow;
+                bool usePrediction = _repository.HasTaskHistory(taskName);
 
-                if (!cancellationToken.IsCancellationRequested && simulationParams.UsePrediction)
+                if (!cancellationToken.IsCancellationRequested && usePrediction)
                 {
                     _resultQueue.Add(new SimulationResult
                     {
-                        AverageDuration = simulationParams.AverageDuration
+                        AverageDuration = _repository.GetAverageDuration(taskName)
                     },
                     cancellationToken);
                 }
@@ -100,12 +100,12 @@ namespace TaskDurationPredictor.Domain
                 {
                     _resultQueue.Add(new SimulationResult
                     {
-                        ActualDuration = simulationParams.ActualDuration,
+                        ActualDuration = totalElapsedTime,
                         IsCompleted = true,
                         Progress = 100
                     }, cancellationToken);
 
-                    await Task.Run(() => _repository.AddOrUpdateTaskHistory(taskName, simulationParams.ActualDuration),
+                    await Task.Run(() => _repository.AddOrUpdateTaskHistory(taskName, totalElapsedTime),
                         cancellationToken);
                 }
             }
@@ -119,38 +119,7 @@ namespace TaskDurationPredictor.Domain
             }
         }
 
-        private (double ActualDuration, double AverageDuration, bool UsePrediction, double Progress) CalculateSimulationParameters(string taskName)
-        {
-            double actualDuration;
-            double averageDuration = 0;
-            bool usePrediction = _repository.HasTaskHistory(taskName);
-
-            if (usePrediction)
-            {
-                averageDuration = _repository.GetAverageDuration(taskName);
-
-                // Aplicamos múltiples factores de aleatoriedad
-                double baseRandomFactor = _random.NextDouble() * (MAX_RANDOM_FACTOR - MIN_RANDOM_FACTOR) + MIN_RANDOM_FACTOR;
-
-                // Añadimos una variación adicional basada en una distribución normal
-                double normalDistribution = RandomHelper.NormalDistributionRandom();
-                double combinedFactor = baseRandomFactor * (1 + normalDistribution * 0.2);
-
-                actualDuration = averageDuration * combinedFactor;
-            }
-            else
-            {
-                // Para duraciones sin predicción, usamos una distribución más variada
-                double baseValue = _random.Next(MIN_BASE_DURATION, MAX_BASE_DURATION);
-                double variationFactor = 1 + (_random.NextDouble() - 0.5) * 0.6; // ±30% variación
-                actualDuration = baseValue * variationFactor;
-            }
-
-            return (actualDuration, averageDuration, usePrediction, 0);
-        }
-
-
-
+        
         private void PresentationThread(Action<double, double?> onProgressUpdated,
                                         Action<double> averageDurationMessage,
                                         Action<double> actualDurationMessage,
