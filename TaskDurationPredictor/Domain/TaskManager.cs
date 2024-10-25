@@ -7,7 +7,7 @@ namespace TaskDurationPredictor.Domain
 {
     public class TaskManager
     {
-        private readonly TaskHistoryRepository _repository;
+        private readonly ITaskHistoryRepository _repository;
         private readonly BlockingCollection<SimulationResult> _resultQueue;
         private static readonly Random _random = new();
 
@@ -21,7 +21,7 @@ namespace TaskDurationPredictor.Domain
         private const double HISTORICAL_WEIGHT = 0.6; // Peso de la estimación histórica vs. la actual
         private const double ADAPTATION_RATE = 0.2;   // Qué tan rápido se adapta la estimación
 
-        public TaskManager(TaskHistoryRepository repository)
+        public TaskManager(ITaskHistoryRepository repository)
         {
             _repository = repository ?? throw new ArgumentNullException(nameof(repository));
             _resultQueue = [];
@@ -59,6 +59,7 @@ namespace TaskDurationPredictor.Domain
             try
             {
                 var simulationParams = CalculateSimulationParameters(taskName);
+                var startTime = DateTime.UtcNow;
 
                 if (!cancellationToken.IsCancellationRequested && simulationParams.UsePrediction)
                 {
@@ -69,9 +70,33 @@ namespace TaskDurationPredictor.Domain
                     cancellationToken);
                 }
 
-                var finalProgress = await SimulateProgressAsync(simulationParams, cancellationToken);
+                for (int i = 1; i <= 100; i++)
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                        break;
 
-                if (!cancellationToken.IsCancellationRequested && finalProgress >= 100)
+                    // Simulate random delay up to 2 seconds
+                    int delay = _random.Next(1, 201);
+                    await Task.Delay(delay, cancellationToken);
+
+                    // Calculate elapsed time
+                    var elapsedTime = DateTime.UtcNow - startTime;
+
+                    // Estimate remaining time in seconds
+                    var estimatedRemainingTime = elapsedTime.TotalSeconds / i * (100 - i);
+
+                    // Add progress and estimated remaining time to the result queue
+                    _resultQueue.Add(new SimulationResult
+                    {
+                        Progress = i,
+                        EstimatedRemaining = estimatedRemainingTime
+                    }, cancellationToken);
+                }
+
+                // Calculate total elapsed time
+                var totalElapsedTime = (DateTime.UtcNow - startTime).TotalSeconds;
+
+                if (!cancellationToken.IsCancellationRequested)
                 {
                     _resultQueue.Add(new SimulationResult
                     {
@@ -94,15 +119,15 @@ namespace TaskDurationPredictor.Domain
             }
         }
 
-        private static (double ActualDuration, double AverageDuration, bool UsePrediction, double Progress) CalculateSimulationParameters(string taskName)
+        private (double ActualDuration, double AverageDuration, bool UsePrediction, double Progress) CalculateSimulationParameters(string taskName)
         {
             double actualDuration;
             double averageDuration = 0;
-            bool usePrediction = TaskHistoryRepository.HasTaskHistory(taskName);
+            bool usePrediction = _repository.HasTaskHistory(taskName);
 
             if (usePrediction)
             {
-                averageDuration = TaskHistoryRepository.GetAverageDuration(taskName);
+                averageDuration = _repository.GetAverageDuration(taskName);
 
                 // Aplicamos múltiples factores de aleatoriedad
                 double baseRandomFactor = _random.NextDouble() * (MAX_RANDOM_FACTOR - MIN_RANDOM_FACTOR) + MIN_RANDOM_FACTOR;
@@ -124,54 +149,7 @@ namespace TaskDurationPredictor.Domain
             return (actualDuration, averageDuration, usePrediction, 0);
         }
 
-        private async Task<double> SimulateProgressAsync((double ActualDuration, double AverageDuration, bool UsePrediction, double Progress) parameters,
-                                                         CancellationToken cancellationToken)
-        {
-            double elapsed = 0;
-            double progress = parameters.Progress;
-            double progressVariability = 1.0;
 
-            var progressTracker = new ProgressTracker(
-                parameters.UsePrediction ? parameters.AverageDuration : parameters.ActualDuration,
-                PROGRESS_WINDOW_SIZE,
-                ADAPTATION_RATE,
-                HISTORICAL_WEIGHT
-            );
-
-            while (progress < 100 && !cancellationToken.IsCancellationRequested)
-            {
-                await Task.Delay(500, cancellationToken);
-
-                // Variabilidad en el tiempo transcurrido
-                double timeIncrement = 0.5 * (1 + (_random.NextDouble() - 0.5) * 0.2);
-                elapsed += timeIncrement;
-
-                // Actualizar progreso con variabilidad
-                progressVariability = Math.Max(0.8, Math.Min(1.2,
-                    progressVariability + (_random.NextDouble() - 0.5) * 0.1));
-                progress = Math.Min(elapsed / parameters.ActualDuration * 100 * progressVariability, 100);
-
-                // Actualizar el tracker y obtener nueva estimación
-                progressTracker.AddProgressPoint(progress, elapsed);
-                double currentEstimate = progressTracker.UpdateEstimate(progress, elapsed);
-
-                // Calcular tiempo restante estimado
-                double? estimatedRemaining = null;
-                if (parameters.UsePrediction)
-                {
-                    estimatedRemaining = Math.Max(currentEstimate - elapsed, 0);
-                }
-
-                _resultQueue.Add(new SimulationResult
-                {
-                    Progress = progress,
-                    EstimatedRemaining = estimatedRemaining
-                },
-                cancellationToken);
-            }
-
-            return progress;
-        }
 
         private void PresentationThread(Action<double, double?> onProgressUpdated,
                                         Action<double> averageDurationMessage,

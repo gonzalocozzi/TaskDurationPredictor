@@ -3,15 +3,24 @@ using TaskDurationPredictor.Model;
 
 namespace TaskDurationPredictor.Repository
 {
-    public class TaskHistoryRepository
+    public class TaskHistoryRepository : ITaskHistoryRepository
     {
         private readonly string historyFileName;
-        private static List<TaskHistory> taskHistories = [];
+        private List<TaskHistory> taskHistories = new List<TaskHistory>();
 
         public TaskHistoryRepository(string historyFileName)
         {
             this.historyFileName = historyFileName;
+            CreateIfNotExistFile();
             LoadTaskHistory();
+        }
+
+        private void CreateIfNotExistFile()
+        {
+            if (!File.Exists(historyFileName))
+            {
+                File.Create(historyFileName).Close();
+            }
         }
 
         public void SaveTaskHistory()
@@ -40,7 +49,7 @@ namespace TaskDurationPredictor.Repository
             }
         }
 
-        public static double GetAverageDuration(string taskName)
+        public double GetAverageDuration(string taskName)
         {
             TaskHistory history = taskHistories.Find(t => t.TaskName == taskName);
             if (history != null && history.Durations.Count > 0)
@@ -55,7 +64,7 @@ namespace TaskDurationPredictor.Repository
             return 0;
         }
 
-        public static bool HasTaskHistory(string taskName)
+        public bool HasTaskHistory(string taskName)
         {
             return taskHistories.Exists(t => t.TaskName == taskName);
         }
