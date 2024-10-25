@@ -1,4 +1,5 @@
-﻿using TaskDurationPredictor.Repository;
+﻿using TaskDurationPredictor.Domain;
+using TaskDurationPredictor.Repository;
 
 namespace TaskDurationPredictor
 {

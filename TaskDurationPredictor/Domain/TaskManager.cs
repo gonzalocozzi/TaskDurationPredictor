@@ -3,7 +3,7 @@ using TaskDurationPredictor.Helper;
 using TaskDurationPredictor.Model;
 using TaskDurationPredictor.Repository;
 
-namespace TaskDurationPredictor
+namespace TaskDurationPredictor.Domain
 {
     public class TaskManager
     {
