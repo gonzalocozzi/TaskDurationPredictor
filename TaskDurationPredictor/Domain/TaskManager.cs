@@ -11,15 +11,15 @@ namespace TaskDurationPredictor.Domain
         private readonly BlockingCollection<SimulationResult> _resultQueue;
         private static readonly Random _random = new();
 
-        private const double MIN_RANDOM_FACTOR = 0.5;
-        private const double MAX_RANDOM_FACTOR = 2.5;
-        private const int MIN_BASE_DURATION = 3;
-        private const int MAX_BASE_DURATION = 45;
+        //private const double MIN_RANDOM_FACTOR = 0.5;
+        //private const double MAX_RANDOM_FACTOR = 2.5;
+        //private const int MIN_BASE_DURATION = 3;
+        //private const int MAX_BASE_DURATION = 45;
 
-        // Factores para el sistema de estimación adaptativa
-        private const int PROGRESS_WINDOW_SIZE = 5;  // Tamaño de la ventana para calcular la velocidad reciente
-        private const double HISTORICAL_WEIGHT = 0.6; // Peso de la estimación histórica vs. la actual
-        private const double ADAPTATION_RATE = 0.2;   // Qué tan rápido se adapta la estimación
+        //// Factores para el sistema de estimación adaptativa
+        //private const int PROGRESS_WINDOW_SIZE = 5;  // Tamaño de la ventana para calcular la velocidad reciente
+        //private const double HISTORICAL_WEIGHT = 0.6; // Peso de la estimación histórica vs. la actual
+        //private const double ADAPTATION_RATE = 0.2;   // Qué tan rápido se adapta la estimación
 
         public TaskManager(ITaskHistoryRepository repository)
         {

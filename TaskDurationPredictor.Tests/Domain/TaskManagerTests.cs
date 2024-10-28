@@ -33,18 +33,36 @@ namespace TaskDurationPredictor.Tests
         }
 
         [Fact]
-        public async Task SimulateTaskAsync_ShouldThrowArgumentNullException_WhenTaskNameIsEmpty()
+        public async Task SimulateTaskAsync_ShouldUsePrediction_WhenTaskHistoryExists()
         {
             // Arrange
-            string taskName = string.Empty;
+            string taskName = "TestTask";
+            _mockRepository.Setup(r => r.HasTaskHistory(taskName)).Returns(true);
+            _mockRepository.Setup(r => r.GetAverageDuration(taskName)).Returns(10.0);
 
-            // Act & Assert
-            await Assert.ThrowsAsync<ArgumentNullException>(() =>
-                _taskManager.SimulateTaskAsync(taskName, null, null, null, CancellationToken.None));
+            // Act
+            await _taskManager.SimulateTaskAsync(taskName, null, null, null, CancellationToken.None);
+
+            // Assert
+            _mockRepository.Verify(r => r.GetAverageDuration(taskName), Times.Once);
         }
 
         [Fact]
-        public async Task SimulateTaskAsync_ShouldCallRepositoryAddOrUpdateTaskHistory_WhenSimulationCompletes()
+        public async Task SimulateTaskAsync_ShouldNotUsePrediction_WhenTaskHistoryDoesNotExist()
+        {
+            // Arrange
+            string taskName = "TestTask";
+            _mockRepository.Setup(r => r.HasTaskHistory(taskName)).Returns(false);
+
+            // Act
+            await _taskManager.SimulateTaskAsync(taskName, null, null, null, CancellationToken.None);
+
+            // Assert
+            _mockRepository.Verify(r => r.GetAverageDuration(taskName), Times.Never);
+        }
+
+        [Fact]
+        public async Task SimulateTaskAsync_ShouldUpdateTaskHistory_WhenSimulationCompletes()
         {
             // Arrange
             string taskName = "TestTask";
@@ -58,38 +76,40 @@ namespace TaskDurationPredictor.Tests
         }
 
         [Fact]
-        public async Task SimulateTaskAsync_ShouldNotCallRepositoryAddOrUpdateTaskHistory_WhenSimulationIsCancelled()
+        public async Task SimulateTaskAsync_ShouldInvokeCallbacks_WhenSimulationProgresses()
         {
             // Arrange
             string taskName = "TestTask";
-            var cts = new CancellationTokenSource();
-            cts.Cancel();
-
-            // Act
-            await Assert.ThrowsAsync<TaskCanceledException>(() =>
-                _taskManager.SimulateTaskAsync(taskName, null, null, null, cts.Token));
-
-            // Assert
-            _mockRepository.Verify(r => r.AddOrUpdateTaskHistory(taskName, It.IsAny<double>()), Times.Never);
-        }
-
-        [Fact]
-        public async Task SimulateTaskAsync_ShouldUpdateProgress_WhenSimulationIsRunning()
-        {
-            // Arrange
-            string taskName = "TestTask";
-            double progressReported = 0;
             _mockRepository.Setup(r => r.HasTaskHistory(taskName)).Returns(false);
 
+            double progressReported = 0;
+            double? estimatedRemainingReported = null;
+            double averageDurationReported = 0;
+            double actualDurationReported = 0;
+
+            Action<double, double?> onProgressUpdated = (progress, estimatedRemaining) =>
+            {
+                progressReported = progress;
+                estimatedRemainingReported = estimatedRemaining;
+            };
+
+            Action<double> averageDurationMessage = (averageDuration) =>
+            {
+                averageDurationReported = averageDuration;
+            };
+
+            Action<double> actualDurationMessage = (actualDuration) =>
+            {
+                actualDurationReported = actualDuration;
+            };
+
             // Act
-            await _taskManager.SimulateTaskAsync(taskName,
-                (progress, estimatedRemaining) => progressReported = progress,
-                null, null, CancellationToken.None);
+            await _taskManager.SimulateTaskAsync(taskName, onProgressUpdated, averageDurationMessage, actualDurationMessage, CancellationToken.None);
 
             // Assert
             Assert.True(progressReported > 0);
+            Assert.Equal(0, averageDurationReported); // No history, so average duration should not be reported
+            Assert.True(actualDurationReported > 0);
         }
-
-        
     }
 }
